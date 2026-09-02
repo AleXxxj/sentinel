@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local config & secrets — never commit these
+.env
+
+# Databases (dev)
+*.db
+
+# Uploaded evidence photos (runtime data)
+evidence/
+
+# pytest
+.pytest_cache/

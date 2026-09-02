@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sentinel Dashboard</title>
+
+  <!-- Leaflet: a small open-source map library. Loaded from its CDN. -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    :root {
+      --bg: #0f1420; --panel: #1a2130; --line: #2a3346;
+      --text: #e6ebf5; --muted: #8b97ad; --accent: #4f8cff; --ok: #35c26b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: -apple-system, system-ui, sans-serif;
+      background: var(--bg); color: var(--text); height: 100vh; overflow: hidden;
+    }
+
+    /* Login screen */
+    #login {
+      display: flex; align-items: center; justify-content: center; height: 100vh;
+    }
+    .card {
+      background: var(--panel); border: 1px solid var(--line);
+      border-radius: 14px; padding: 32px; width: 340px;
+    }
+    .card h1 { margin: 0 0 4px; font-size: 22px; }
+    .card p { margin: 0 0 20px; color: var(--muted); font-size: 13px; }
+    label { display: block; font-size: 12px; color: var(--muted); margin: 12px 0 4px; }
+    input {
+      width: 100%; padding: 10px 12px; border-radius: 8px;
+      border: 1px solid var(--line); background: #0d121c; color: var(--text); font-size: 14px;
+    }
+    button {
+      width: 100%; margin-top: 20px; padding: 11px; border: none; border-radius: 8px;
+      background: var(--accent); color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    button:hover { filter: brightness(1.08); }
+    .err { color: #ff6b6b; font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+    /* App layout */
+    #app { display: none; height: 100vh; grid-template-columns: 300px 1fr; }
+    #sidebar {
+      background: var(--panel); border-right: 1px solid var(--line);
+      padding: 18px; overflow-y: auto;
+    }
+    .brand { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
+    .who { font-size: 12px; color: var(--muted); margin-bottom: 18px; }
+    .device {
+      padding: 12px; border: 1px solid var(--line); border-radius: 10px;
+      margin-bottom: 10px; cursor: pointer;
+    }
+    .device:hover { border-color: var(--accent); }
+    .device.active { border-color: var(--accent); background: #16213a; }
+    .device .name { font-weight: 600; font-size: 14px; }
+    .device .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+    .dot.on { background: var(--ok); } .dot.off { background: #556; }
+    #map { height: 100vh; }
+    .stat { font-size: 12px; color: var(--muted); }
+    .stat b { color: var(--text); font-weight: 600; }
+    .owner-tag { font-size: 11px; color: var(--accent); margin-top: 3px; }
+    .logout {
+      background: transparent; border: 1px solid var(--line); color: var(--muted);
+      margin-top: 18px; padding: 8px;
+    }
+    .lost-btn {
+      background: #b23b3b; margin-top: 12px; padding: 9px; font-size: 13px;
+    }
+    .cmds { display: flex; gap: 8px; margin-top: 12px; }
+    .cmd-btn {
+      flex: 1; margin: 0; padding: 9px 0; font-size: 13px; background: #24304a;
+    }
+    .cmd-btn.danger { background: #7a2f2f; }
+    .cmd-status { font-size: 12px; color: var(--muted); margin-top: 8px; min-height: 16px; }
+    .alerts { margin-top: 14px; }
+    .alerts h3 { font-size: 12px; color: var(--muted); text-transform: uppercase; margin: 0 0 8px; }
+    .alert {
+      background: #241a1a; border: 1px solid #4a2a2a; border-radius: 8px;
+      padding: 9px 10px; margin-bottom: 8px; font-size: 12px;
+    }
+    .alert.seen { background: #171c28; border-color: var(--line); opacity: 0.7; }
+    .alert .t { font-weight: 700; color: #ff8f6b; }
+    .alert.seen .t { color: var(--muted); }
+    .alert .m { color: var(--text); margin-top: 3px; }
+    .alert .time { color: var(--muted); margin-top: 3px; }
+  </style>
+</head>
+<body>
+  <!-- LOGIN -->
+  <div id="login">
+    <div class="card">
+      <h1>Sentinel</h1>
+      <p>Sign in to see your devices.</p>
+      <label>Email</label>
+      <input id="email" type="email" placeholder="you@example.com" />
+      <label>Password</label>
+      <input id="password" type="password" placeholder="••••••••" />
+      <button onclick="login()">Sign in</button>
+      <div class="err" id="loginErr"></div>
+    </div>
+  </div>
+
+  <!-- APP -->
+  <div id="app">
+    <div id="sidebar">
+      <div class="brand">Sentinel</div>
+      <div class="who" id="who"></div>
+      <div id="deviceList"></div>
+      <div id="detail"></div>
+      <button class="logout" onclick="logout()">Sign out</button>
+    </div>
+    <div id="map"></div>
+  </div>
+
+  <script>
+    // The API is served from the same origin as this page.
+    const API = "";
+    let token = null;
+    let map, marker, trail;
+    let selectedDeviceId = null;
+    let pollTimer = null;
+
+    // --- tiny fetch helper that adds the auth header ---
+    async function api(path, options = {}) {
+      const res = await fetch(API + path, {
+        ...options,
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: "Bearer " + token } : {}),
+          ...(options.headers || {}),
+        },
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      return res.status === 204 ? null : res.json();
+    }
+
+    async function login() {
+      const email = document.getElementById("email").value.trim();
+      const password = document.getElementById("password").value;
+      const errEl = document.getElementById("loginErr");
+      errEl.textContent = "";
+      try {
+        const data = await api("/auth/login", {
+          method: "POST",
+          body: JSON.stringify({ email, password }),
+        });
+        token = data.access_token;
+        document.getElementById("login").style.display = "none";
+        document.getElementById("app").style.display = "grid";
+        document.getElementById("who").textContent = email + "  ·  " + data.role;
+        initMap();
+        loadDevices();
+      } catch (e) {
+        errEl.textContent = e.message;
+      }
+    }
+
+    function logout() {
+      if (pollTimer) clearInterval(pollTimer);
+      token = null; selectedDeviceId = null;
+      document.getElementById("app").style.display = "none";
+      document.getElementById("login").style.display = "flex";
+    }
+
+    function initMap() {
+      if (map) return;
+      map = L.map("map").setView([6.5244, 3.3792], 13);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap",
+      }).addTo(map);
+    }
+
+    async function loadDevices() {
+      const devices = await api("/devices");
+      const list = document.getElementById("deviceList");
+      if (devices.length === 0) {
+        list.innerHTML = '<div class="stat">No devices yet. Register one, then run the simulator.</div>';
+        return;
+      }
+      list.innerHTML = "";
+      for (const d of devices) {
+        const seenRecently = d.last_seen &&
+          (Date.now() - new Date(d.last_seen).getTime()) < 30000;
+        const el = document.createElement("div");
+        el.className = "device" + (d.id === selectedDeviceId ? " active" : "");
+        el.innerHTML =
+          `<div class="name">${d.name}</div>
+           <div class="meta"><span class="dot ${seenRecently ? "on" : "off"}"></span>
+           ${d.status} · ${d.model || d.platform}</div>` +
+          // owner_email is only present for super admins (the fleet view).
+          (d.owner_email ? `<div class="owner-tag">owner: ${d.owner_email}</div>` : "");
+        el.onclick = () => selectDevice(d.id);
+        list.appendChild(el);
+      }
+      // Auto-select the first device on first load.
+      if (!selectedDeviceId && devices.length) selectDevice(devices[0].id);
+    }
+
+    async function selectDevice(id) {
+      selectedDeviceId = id;
+      loadDevices();               // refresh highlight
+      if (pollTimer) clearInterval(pollTimer);
+      await refreshLocation();
+      // Poll every 3 seconds so the map tracks the phone live.
+      pollTimer = setInterval(refreshLocation, 3000);
+    }
+
+    async function refreshLocation() {
+      if (!selectedDeviceId) return;
+      let latest, history = [];
+      try {
+        latest = await api(`/devices/${selectedDeviceId}/latest`);
+        history = await api(`/devices/${selectedDeviceId}/beacons?limit=200`);
+      } catch (e) {
+        document.getElementById("detail").innerHTML =
+          `<div class="stat">Waiting for the phone to send its first location…</div>`;
+        return;
+      }
+
+      const pos = [latest.latitude, latest.longitude];
+
+      // Marker at current position.
+      if (!marker) marker = L.marker(pos).addTo(map);
+      else marker.setLatLng(pos);
+
+      // Trail line of recent positions (history comes newest-first).
+      const line = history.map(b => [b.latitude, b.longitude]).reverse();
+      if (!trail) trail = L.polyline(line, { color: "#4f8cff", weight: 3 }).addTo(map);
+      else trail.setLatLngs(line);
+
+      map.panTo(pos);
+
+      const when = new Date(latest.recorded_at).toLocaleTimeString();
+      document.getElementById("detail").innerHTML = `
+        <hr style="border-color:var(--line);margin:16px 0" />
+        <div class="stat">Last fix: <b>${when}</b></div>
+        <div class="stat">Battery: <b>${latest.battery_pct ?? "?"}%</b></div>
+        <div class="stat">Accuracy: <b>±${Math.round(latest.accuracy_m || 0)} m</b></div>
+        <div class="stat">Lat/Lng: <b>${pos[0].toFixed(5)}, ${pos[1].toFixed(5)}</b></div>
+        <div class="stat">Beacons: <b>${history.length}</b></div>
+        <div class="cmds">
+          <button class="cmd-btn" onclick="sendCommand('ring')">Ring</button>
+          <button class="cmd-btn" onclick="sendCommand('lock')">Lock</button>
+          <button class="cmd-btn danger" onclick="sendCommand('remove')">Remove</button>
+        </div>
+        <div class="cmd-status" id="cmdStatus"></div>
+        <button class="lost-btn" onclick="reportLost()">Report this device lost</button>
+        <div class="alerts" id="alerts"></div>`;
+
+      await refreshAlerts();
+      await refreshCommands();
+    }
+
+    async function refreshAlerts() {
+      if (!selectedDeviceId) return;
+      let alerts = [];
+      try { alerts = await api(`/devices/${selectedDeviceId}/alerts`); } catch (e) { return; }
+      const box = document.getElementById("alerts");
+      if (!box) return;
+      if (alerts.length === 0) { box.innerHTML = ""; return; }
+
+      const labels = {
+        sim_swap: "SIM SWAP", failed_unlock: "FAILED UNLOCK",
+        powered_off: "POWERED OFF", low_battery: "LOW BATTERY", marked_lost: "MARKED LOST",
+      };
+      box.innerHTML = "<h3>Alerts</h3>" + alerts.map(a => `
+        <div class="alert ${a.acknowledged ? "seen" : ""}">
+          <div class="t">${labels[a.type] || a.type}</div>
+          <div class="m">${a.message}${a.new_sim_number ? " · " + a.new_sim_number : ""}</div>
+          ${a.photo_url ? `<div><a href="#" onclick="viewPhoto(${a.id});return false" style="color:var(--accent);font-size:12px">📷 View evidence photo</a></div>` : ""}
+          <div class="time" onclick="ackAlert(${a.id})">${new Date(a.created_at).toLocaleString()}${a.acknowledged ? "" : "  · tap to acknowledge"}</div>
+        </div>`).join("");
+    }
+
+    async function viewPhoto(alertId) {
+      // The photo endpoint is access-controlled, so we fetch it with the auth
+      // header, turn it into a blob URL, and open it.
+      try {
+        const res = await fetch(`/alerts/${alertId}/photo`, {
+          headers: { Authorization: "Bearer " + token },
+        });
+        if (!res.ok) throw new Error("Could not load photo");
+        const url = URL.createObjectURL(await res.blob());
+        window.open(url, "_blank");
+      } catch (e) { alert(e.message); }
+    }
+
+    async function ackAlert(id) {
+      try { await api(`/alerts/${id}/ack`, { method: "POST" }); await refreshAlerts(); }
+      catch (e) { alert(e.message); }
+    }
+
+    async function sendCommand(type) {
+      if (!selectedDeviceId) return;
+      if (type === "remove" && !confirm("Remove the Sentinel agent from this device? This releases protection.")) return;
+      try {
+        await api(`/devices/${selectedDeviceId}/commands`, {
+          method: "POST", body: JSON.stringify({ type }),
+        });
+        await refreshCommands();
+      } catch (e) {
+        document.getElementById("cmdStatus").textContent = e.message;
+      }
+    }
+
+    async function refreshCommands() {
+      if (!selectedDeviceId) return;
+      let cmds = [];
+      try { cmds = await api(`/devices/${selectedDeviceId}/commands`); } catch (e) { return; }
+      const box = document.getElementById("cmdStatus");
+      if (!box) return;
+      if (cmds.length === 0) { box.textContent = ""; return; }
+      const c = cmds[0];
+      box.textContent = `Last command: ${c.type} — ${c.status}` + (c.result ? ` (${c.result})` : "");
+    }
+
+    async function reportLost() {
+      if (!selectedDeviceId) return;
+      if (!confirm("Flag this device as lost/stolen?")) return;
+      try {
+        await api(`/devices/${selectedDeviceId}/lost`, { method: "POST" });
+        await loadDevices();
+        await refreshLocation();
+      } catch (e) { alert(e.message); }
+    }
+
+    // Allow pressing Enter to log in.
+    document.getElementById("password").addEventListener("keydown", e => {
+      if (e.key === "Enter") login();
+    });
+  </script>
+</body>
+</html>

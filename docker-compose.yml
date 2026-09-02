@@ -1,0 +1,37 @@
+# Local production-like stack: the API + a real PostgreSQL database.
+# Run it with:  docker compose up --build
+# Then create the first admin:  docker compose run --rm api python seed.py
+# The API will be at http://localhost:8000  (dashboard at /dashboard/).
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: sentinel
+      POSTGRES_PASSWORD: sentinel_local_pw
+      POSTGRES_DB: sentinel
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: ./backend
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://sentinel:sentinel_local_pw@db:5432/sentinel
+      SECRET_KEY: local-dev-secret-change-me
+      ENVIRONMENT: production
+      CORS_ORIGINS: "*"
+      FIRST_SUPERADMIN_EMAIL: admin@example.com
+      FIRST_SUPERADMIN_PASSWORD: change-me-now
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:

@@ -1,0 +1,10 @@
+# Keep the image small and free of local/dev artifacts and secrets.
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+tests/
+*.db
+evidence/
+.env

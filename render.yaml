@@ -1,0 +1,32 @@
+# Render.com deployment blueprint.
+# In the Render dashboard: New > Blueprint, connect this repo, and Render reads
+# this file to create the API service + a PostgreSQL database automatically.
+# You will be prompted to enter the two "sync: false" secret values.
+
+services:
+  - type: web
+    name: sentinel-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sentinel-db
+          property: connectionString
+      - key: SECRET_KEY
+        generateValue: true          # Render generates a strong random value
+      - key: ENVIRONMENT
+        value: production
+      - key: CORS_ORIGINS
+        value: "*"                   # set to your dashboard URL once known
+      - key: FIRST_SUPERADMIN_EMAIL
+        sync: false                  # you enter this in the dashboard
+      - key: FIRST_SUPERADMIN_PASSWORD
+        sync: false                  # you enter this in the dashboard
+
+databases:
+  - name: sentinel-db
+    databaseName: sentinel
+    user: sentinel
