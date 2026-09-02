@@ -7,6 +7,8 @@ services:
   - type: web
     name: sentinel-api
     runtime: docker
+    plan: free
+    region: oregon
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     healthCheckPath: /health
@@ -28,5 +30,7 @@ services:
 
 databases:
   - name: sentinel-db
+    plan: free
+    region: oregon
     databaseName: sentinel
     user: sentinel
