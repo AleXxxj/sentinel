@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import settings
@@ -52,6 +53,12 @@ app.include_router(devices.router)
 app.include_router(beacons.router)
 app.include_router(alerts.router)
 app.include_router(commands.router)
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    # Send visitors of the bare URL to the dashboard instead of a 404.
+    return RedirectResponse(url="/dashboard/")
 
 
 @app.get("/health", tags=["meta"])
