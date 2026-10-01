@@ -201,13 +201,43 @@
       if (!selectedDeviceId && devices.length) selectDevice(devices[0].id);
     }
 
+    let lastAlertsSig = null;
+
     async function selectDevice(id) {
       selectedDeviceId = id;
+      lastAlertsSig = null;        // force alerts to re-render for the new device
       loadDevices();               // refresh highlight
+      buildDetailSkeleton();       // build the panel once; polls only update values
       if (pollTimer) clearInterval(pollTimer);
       await refreshLocation();
       // Poll every 3 seconds so the map tracks the phone live.
       pollTimer = setInterval(refreshLocation, 3000);
+    }
+
+    // Build the detail panel's fixed structure once, with empty value spans we
+    // update in place. This avoids rebuilding (and flickering) the whole panel
+    // on every 3-second poll.
+    function buildDetailSkeleton() {
+      document.getElementById("detail").innerHTML = `
+        <hr style="border-color:var(--line);margin:16px 0" />
+        <div class="stat">Last fix: <b id="s-when">—</b></div>
+        <div class="stat">Battery: <b id="s-batt">—</b></div>
+        <div class="stat">Accuracy: <b id="s-acc">—</b></div>
+        <div class="stat">Lat/Lng: <b id="s-pos">—</b></div>
+        <div class="stat">Beacons: <b id="s-count">—</b></div>
+        <div class="cmds">
+          <button class="cmd-btn" onclick="sendCommand('ring')">Ring</button>
+          <button class="cmd-btn" onclick="sendCommand('lock')">Lock</button>
+          <button class="cmd-btn danger" onclick="sendCommand('remove')">Remove</button>
+        </div>
+        <div class="cmd-status" id="cmdStatus"></div>
+        <button class="lost-btn" onclick="reportLost()">Report this device lost</button>
+        <div class="alerts" id="alerts"></div>`;
+    }
+
+    function setText(id, val) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = val;
     }
 
     async function refreshLocation() {
@@ -217,8 +247,8 @@
         latest = await api(`/devices/${selectedDeviceId}/latest`);
         history = await api(`/devices/${selectedDeviceId}/beacons?limit=200`);
       } catch (e) {
-        document.getElementById("detail").innerHTML =
-          `<div class="stat">Waiting for the phone to send its first location…</div>`;
+        setText("s-when", "waiting for first location…");
+        await refreshAlerts();     // alerts can arrive before any location
         return;
       }
 
@@ -235,22 +265,12 @@
 
       map.panTo(pos);
 
-      const when = new Date(latest.recorded_at).toLocaleTimeString();
-      document.getElementById("detail").innerHTML = `
-        <hr style="border-color:var(--line);margin:16px 0" />
-        <div class="stat">Last fix: <b>${when}</b></div>
-        <div class="stat">Battery: <b>${latest.battery_pct ?? "?"}%</b></div>
-        <div class="stat">Accuracy: <b>±${Math.round(latest.accuracy_m || 0)} m</b></div>
-        <div class="stat">Lat/Lng: <b>${pos[0].toFixed(5)}, ${pos[1].toFixed(5)}</b></div>
-        <div class="stat">Beacons: <b>${history.length}</b></div>
-        <div class="cmds">
-          <button class="cmd-btn" onclick="sendCommand('ring')">Ring</button>
-          <button class="cmd-btn" onclick="sendCommand('lock')">Lock</button>
-          <button class="cmd-btn danger" onclick="sendCommand('remove')">Remove</button>
-        </div>
-        <div class="cmd-status" id="cmdStatus"></div>
-        <button class="lost-btn" onclick="reportLost()">Report this device lost</button>
-        <div class="alerts" id="alerts"></div>`;
+      // Update only the values — no DOM rebuild, so no flicker.
+      setText("s-when", new Date(latest.recorded_at).toLocaleTimeString());
+      setText("s-batt", (latest.battery_pct ?? "?") + "%");
+      setText("s-acc", "±" + Math.round(latest.accuracy_m || 0) + " m");
+      setText("s-pos", pos[0].toFixed(5) + ", " + pos[1].toFixed(5));
+      setText("s-count", history.length);
 
       await refreshAlerts();
       await refreshCommands();
@@ -262,6 +282,13 @@
       try { alerts = await api(`/devices/${selectedDeviceId}/alerts`); } catch (e) { return; }
       const box = document.getElementById("alerts");
       if (!box) return;
+
+      // Only redraw when the alerts actually change (new alert, acknowledged,
+      // or a photo was attached). Otherwise leave the DOM untouched — no flicker.
+      const sig = JSON.stringify(alerts.map(a => [a.id, a.acknowledged, a.photo_url]));
+      if (sig === lastAlertsSig) return;
+      lastAlertsSig = sig;
+
       if (alerts.length === 0) { box.innerHTML = ""; return; }
 
       const labels = {
